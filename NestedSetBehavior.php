@@ -27,17 +27,23 @@ class NestedSetBehavior extends CActiveRecordBehavior
     private static $_c = 0;
 
 
+    /**
+     * @return integer Number of child nodes.
+     */
     public function getNumOfChildren()
     {
         return (
-            (
-                $this->owner->getAttribute($this->rightAttribute)
-                    - $this->owner->getAttribute($this->leftAttribute)
-            ) - 1
+            ($this->owner->getAttribute($this->rightAttribute) - $this->owner->getAttribute($this->leftAttribute))
+            - 1
         ) / 2;
     }
 
 
+    /**
+     * Named scope.
+     *
+     * @return CActiveRecord|NestedSetBehavior the owner.
+     */
     public function rootsWithDiveToCurrentNode()
     {
         $criteria = $this->owner->getDbCriteria();
@@ -89,7 +95,7 @@ SQL;
     }
 
     /**
-     * Named scope.
+     * Named scope. Limits max nesting level.
      *
      * @param integer $level
      *
@@ -109,9 +115,9 @@ SQL;
     }
 
     /**
-     * Named scope.
+     * Named scope. Sorts resulting set seriatim.
      *
-     * @return CActiveRecord the owner.
+     * @return CActiveRecord|NestedSetBehavior the owner.
      */
     public function allSorted()
     {
@@ -135,7 +141,7 @@ SQL;
      *
      * @param int $depth the depth.
      *
-     * @return CActiveRecord the owner.
+     * @return CActiveRecord|NestedSetBehavior the owner.
      */
     public function descendants($depth = null)
     {
