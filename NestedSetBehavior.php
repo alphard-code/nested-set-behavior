@@ -34,62 +34,70 @@ class NestedSetBehavior extends CActiveRecordBehavior
     {
         return (
             ($this->owner->getAttribute($this->rightAttribute) - $this->owner->getAttribute($this->leftAttribute))
-            - 1
+                - 1
         ) / 2;
     }
-
 
     /**
      * Named scope.
      *
+     * @param array $nodes List of primary keys of nodes that should be reached at tree structure.
+     *
      * @return CActiveRecord|NestedSetBehavior the owner.
      */
-    public function rootsWithDiveToCurrentNode()
+    public function rootsWithDiveTo(array $nodes)
     {
-        $criteria = $this->owner->getDbCriteria();
-        $db       = $this->owner->getDbConnection();
-        $alias    = $this->owner->getTableAlias();
-        $jAlias   = $alias . 'Joined';
-        $alias    = $db->quoteColumnName($alias);
-        $jAlias   = $db->quoteColumnName($jAlias);
+        $criteria         = $this->owner->getDbCriteria();
+        $db               = $this->owner->getDbConnection();
+        $alias            = $this->owner->getTableAlias();
+        $joinedTableAlias = $alias . 'Joined';
+        $alias            = $db->quoteColumnName($alias);
+        $joinedTableAlias = $db->quoteColumnName($joinedTableAlias);
+        $tableName        = $db->quoteTableName($this->owner->tableName());
+        $left             = $db->quoteColumnName($this->leftAttribute);
+        $right            = $db->quoteColumnName($this->rightAttribute);
+        $root             = $db->quoteColumnName($this->rootAttribute);
+        $level            = $db->quoteColumnName($this->levelAttribute);
+        $id               = $db->quoteColumnName($this->idAttribute);
+        $inCond           = 'IN (' . implode(',', $nodes) . ')';
 
-        $tableName = $db->quoteTableName($this->owner->tableName());
+        // find final nodes
+        $criteria->addInCondition($alias . '.' . $id, $nodes);
 
+        // no need to select them at this context, because we join the same table
+        // with another alias and select only joined records
+        $criteria->select = $joinedTableAlias . '.*';
 
-        $left  = $db->quoteColumnName($this->leftAttribute);
-        $right = $db->quoteColumnName($this->rightAttribute);
-        $root  = $db->quoteColumnName($this->rootAttribute);
-        $level = $db->quoteColumnName($this->levelAttribute);
-        $id    = $db->quoteColumnName($this->idAttribute);
-
-        $criteria->distinct = true;
-        $criteria->select   = $jAlias . '.*';
-        $criteria->addCondition($alias . '.' . $left . ' < :current_left');
-        $criteria->addCondition($alias . '.' . $right . ' > :current_right');
-        $criteria->addCondition($alias . '.' . $root . ' = :current_root');
+        // joined table will contain final nodes, their descendants and root nodes
         $criteria->join = <<<SQL
-LEFT JOIN {$tableName} AS {$jAlias}
+LEFT JOIN {$tableName} AS {$joinedTableAlias}
     ON
       (
-        ({$jAlias}.{$left} > {$alias}.{$left}
-         AND
-         {$jAlias}.{$right} < {$alias}.{$right}
-         AND
-         {$jAlias}.{$root} = {$alias}.{$root}
-         AND
-         {$jAlias}.{$level} <= ({$alias}.{$level} + 1)
+        # Final nodes descendatns
+        (
+          {$joinedTableAlias}.{$left} > {$alias}.{$left}
+          AND
+          {$joinedTableAlias}.{$right} < {$alias}.{$right}
+          AND
+          {$joinedTableAlias}.{$root} = {$alias}.{$root}
+          AND
+          {$joinedTableAlias}.{$level} <= ({$alias}.{$level} + 1)
         )
-        OR ({$jAlias}.{$id} = {$alias}.{$id})
-        OR ({$jAlias}.{$level} = 1)
+
+        # Final nodes
+        OR ({$joinedTableAlias}.{$id} {$inCond})
+
+        # Root nodes
+        OR ({$joinedTableAlias}.{$level} = 1)
 
       )
 SQL;
 
-        $criteria->params[':current_left']  = $this->owner->{$this->leftAttribute};
-        $criteria->params[':current_right'] = $this->owner->{$this->rightAttribute};
-        $criteria->params[':current_root']  = $this->owner->{$this->rootAttribute};
+        // no need dublicates
+        $criteria->distinct = true;
 
-        $criteria->order = $jAlias . '.' . $root . ', ' . $jAlias . '.' . $left;
+        // order by root, left_key
+        $criteria->order = $joinedTableAlias . '.' . $root . ', ' . $joinedTableAlias . '.' . $left;
 
         return $this->owner;
     }
