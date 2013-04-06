@@ -47,48 +47,65 @@ class NestedSetBehavior extends CActiveRecordBehavior
      */
     public function rootsWithDiveTo(array $nodes)
     {
-        $criteria         = $this->owner->getDbCriteria();
-        $db               = $this->owner->getDbConnection();
-        $alias            = $this->owner->getTableAlias();
-        $joinedTableAlias = $alias . 'Joined';
-        $alias            = $db->quoteColumnName($alias);
-        $joinedTableAlias = $db->quoteColumnName($joinedTableAlias);
-        $tableName        = $db->quoteTableName($this->owner->tableName());
-        $left             = $db->quoteColumnName($this->leftAttribute);
-        $right            = $db->quoteColumnName($this->rightAttribute);
-        $root             = $db->quoteColumnName($this->rootAttribute);
-        $level            = $db->quoteColumnName($this->levelAttribute);
-        $id               = $db->quoteColumnName($this->idAttribute);
-        $inCond           = 'IN (' . implode(',', $nodes) . ')';
+        $criteria                         = $this->owner->getDbCriteria();
+        $db                               = $this->owner->getDbConnection();
+        $alias                            = $this->owner->getTableAlias();
+        $resultingSetAlias                = $db->quoteColumnName($alias . 'RS');
+        $finalNodesAndTheirAncestorsAlias = $db->quoteColumnName($alias . 'FNA');
+        $alias                            = $db->quoteColumnName($alias);
+        $tableName                        = $db->quoteTableName($this->owner->tableName());
+        $left                             = $db->quoteColumnName($this->leftAttribute);
+        $right                            = $db->quoteColumnName($this->rightAttribute);
+        $root                             = $db->quoteColumnName($this->rootAttribute);
+        $level                            = $db->quoteColumnName($this->levelAttribute);
+        $id                               = $db->quoteColumnName($this->idAttribute);
+        $inCond                           = 'IN (' . implode(',', $nodes) . ')';
 
         // find final nodes
         $criteria->addInCondition($alias . '.' . $id, $nodes);
 
         // no need to select them at this context, because we join the same table
         // with another alias and select only joined records
-        $criteria->select = $joinedTableAlias . '.*';
+        $criteria->select = $resultingSetAlias . '.*';
 
-        // joined table will contain final nodes, their descendants and root nodes
+        // joined table will contain final nodes, their ancestors and root nodes
         $criteria->join = <<<SQL
-LEFT JOIN {$tableName} AS {$joinedTableAlias}
+## Find final nodes and their ancestors
+LEFT JOIN {$tableName} AS {$finalNodesAndTheirAncestorsAlias}
+ON
+(
+  ## Join ancestors
+  (
+    {$finalNodesAndTheirAncestorsAlias}.{$left} < {$alias}.{$left}
+    AND
+    {$finalNodesAndTheirAncestorsAlias}.{$right} > {$alias}.{$right}
+    AND
+    {$finalNodesAndTheirAncestorsAlias}.{$root} = {$alias}.{$root}
+  )
+  OR
+  ## This set will also contain final nodes
+  ({$finalNodesAndTheirAncestorsAlias}.{$id} = {$alias}.{$id})
+)
+
+LEFT JOIN {$tableName} AS {$resultingSetAlias}
     ON
       (
-        # Final nodes descendatns
+        ## Final nodes and their ancestors' brothers
         (
-          {$joinedTableAlias}.{$left} > {$alias}.{$left}
+          {$resultingSetAlias}.{$left} > {$finalNodesAndTheirAncestorsAlias}.{$left}
           AND
-          {$joinedTableAlias}.{$right} < {$alias}.{$right}
+          {$resultingSetAlias}.{$right} < {$finalNodesAndTheirAncestorsAlias}.{$right}
           AND
-          {$joinedTableAlias}.{$root} = {$alias}.{$root}
+          {$resultingSetAlias}.{$root} = {$finalNodesAndTheirAncestorsAlias}.{$root}
           AND
-          {$joinedTableAlias}.{$level} <= ({$alias}.{$level} + 1)
+         {$resultingSetAlias}.{$level} <= ({$finalNodesAndTheirAncestorsAlias}.{$level} + 1)
         )
 
-        # Final nodes
-        OR ({$joinedTableAlias}.{$id} {$inCond})
+        ## Final nodes and their ancestors
+        OR ({$resultingSetAlias}.{$id} = {$finalNodesAndTheirAncestorsAlias}.{$id})
 
-        # Root nodes
-        OR ({$joinedTableAlias}.{$level} = 1)
+        ## Root nodes
+        OR ({$resultingSetAlias}.{$level} = 1)
 
       )
 SQL;
@@ -97,7 +114,7 @@ SQL;
         $criteria->distinct = true;
 
         // order by root, left_key
-        $criteria->order = $joinedTableAlias . '.' . $root . ', ' . $joinedTableAlias . '.' . $left;
+        $criteria->order = $resultingSetAlias . '.' . $root . ', ' . $resultingSetAlias . '.' . $left;
 
         return $this->owner;
     }
